@@ -80,7 +80,7 @@ export default function HomePage() {
       <header style={styles.header}>
         <h3 style={{ marginTop: "10px", marginLeft: "5px" }}>Text Extractor</h3>
         <nav>
-          <Link to="/HistoryPage" style={styles.navLink}>History</Link>
+          <Link to="/HistoryPage" style={styles.navLink}></Link>
           <span style={styles.navLink}>
               {user ? (
                   <span>Hi, {user.displayName}</span>

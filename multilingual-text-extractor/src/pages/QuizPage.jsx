@@ -2,9 +2,28 @@ import { Link, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Tesseract from "tesseract.js";
+import { createWorker } from 'tesseract.js';
 import { FiUpload, FiFileText, FiImage, FiX } from "react-icons/fi";
 import exportToFirestore from "../components/ExportToFireStore";
 import { useAuth } from "../context/AuthContext";
+import InteractiveOCROverlay from '../components/InteractiveOCROverlay';
+
+function flattenTesseractWords(blocks) {
+  const words = [];
+
+  blocks.forEach((block) => {
+    block.paragraphs?.forEach((para) => {
+      para.lines?.forEach((line) => {
+        line.words?.forEach((word) => {
+          words.push(word);
+        });
+      });
+    });
+  });
+
+  return words;
+}
+
 
 export default function QuizPage() {
   // Quiz state
@@ -25,6 +44,7 @@ export default function QuizPage() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [questionCount, setQuestionCount] = useState(5);
   const textareaRef = useRef(null);
+  const [ocrWordsArray, setOcrWordsArray] = useState([]);
   
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
@@ -337,27 +357,38 @@ export default function QuizPage() {
     setImagePath(URL.createObjectURL(event.target.files[0]));
   };
 
-  // Extract text from image
-  const handleExtractText = () => {
+  const handleExtractText = async () => {
     setIsExtracting(true);
-    Tesseract.recognize(
-      imagePath,
-      selectedLanguage,
-      { logger: (m) => console.log(m) }
-    )
-    .catch((err) => {
-      console.error("OCR Error:", err);
-      setError("Failed to extract text from image");
-    })
-    .then((result) => {
-      setStudyGuide(result.data.text);
+  
+    const worker = await createWorker(selectedLanguage); 
+    await worker.setParameters({
+      tessedit_pageseg_mode: Tesseract.PSM.AUTO, // performs text segmentation without OSD 
+    });
+
+    try {
+      const { data } = await worker.recognize(imagePath, undefined, {blocks: true}); //to configure the output you need to assign true to desired output modes! If only documentation wasn't terrible! 
+  
+      console.log("Full OCR data:", data); 
+      const wordsArr = flattenTesseractWords(data.blocks);
+      console.log("Words with bounding boxes:", wordsArr);
+      setOcrWordsArray(wordsArr);
+
+      setStudyGuide(data.text);
       setIsExtracting(false);
+  
       if (textareaRef.current) {
         textareaRef.current.focus();
       }
-    });
+  
+    } catch (err) {
+      console.error("OCR Error:", err);
+      setError("Failed to extract text from image");
+      setIsExtracting(false);
+    }
+  
+    await worker.terminate();
   };
-
+  
   // Handle question count input
   const handleQuestionCountChange = (e) => {
     const value = e.target.value;
@@ -554,8 +585,16 @@ export default function QuizPage() {
                     style={styles.imagePreview} 
                     alt="Uploaded study material"
                   />
+                  {ocrWordsArray.length > 0 && (
+                    <InteractiveOCROverlay
+                      imageSrc={imagePath}
+                      words={ocrWordsArray}
+                    />
+                  )}
                 </div>
               )}
+
+              
             </div>
             
             <div style={{ marginBottom: "1rem" }}>
@@ -582,19 +621,21 @@ export default function QuizPage() {
 
             {/* Extract Button - Only shows when image is uploaded */}
             {imagePath && (
-              <button 
-                onClick={handleExtractText} 
-                style={{
-                  ...styles.button,
-                  width: "100%",
-                  maxWidth: "300px",
-                  margin: "0 auto 1.5rem",
-                  display: "block"
-                }}
-                disabled={isExtracting}
-              >
-                {isExtracting ? "Extracting Text..." : "Extract Text from Image"}
-              </button>
+              <>
+                <button 
+                  onClick={handleExtractText} 
+                  style={{
+                    ...styles.button,
+                    width: "100%",
+                    maxWidth: "300px",
+                    margin: "0 auto 1.5rem",
+                    display: "block"
+                  }}
+                  disabled={isExtracting}
+                >
+                  {isExtracting ? "Extracting Text..." : "Extract Text from Image"}
+                </button>
+              </>
             )}
 
             {/* Divider - Only shows when no image is uploaded or after text extraction */}
@@ -620,6 +661,9 @@ export default function QuizPage() {
                 placeholder="Text will appear here..."
               />
             </div>
+            
+            
+
           </div>
         ) : (
           <div style={styles.questionCard}>
